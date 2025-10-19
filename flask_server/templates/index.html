@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>BayesianADHD Thesis Prototype</title>
+    <link rel="stylesheet" href="static/styles.css" />
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+  </head>
+  <body>
+    <div class="container d-flex flex-column align-items-center">
+      <h1>BayesianADHD</h1>
+      <!-- Form for fupload -->
+      <div class="upload-section">
+        <form id="upload-form" action="/predict" method="POST" enctype="multipart/form-data">
+          <label for="file" class="btn btn-primary">Upload an EEG Recording</label>
+          <input
+            type="file"
+            name="file"
+            id="file"
+            accept=".csv"
+            onchange="previewImage(event)"
+            required
+          />
+          <button type="submit" id="submit-btn" class="btn btn-primary" disabled>
+            Upload & Analyze
+          </button>
+        </form>
+      </div>
+
+      <!-- Dynamic result display -->
+      <div class="" style="height: 2em"></div>
+      <div class="result" id="result" aria-live="polite" style="height: 500px"></div>
+    </div>
+
+    <script>
+      const sleep = (time) => new Promise((r, _) => setTimeout(() => r(), time));
+
+      function disableSubmitButton() {
+        const submitButton = document.getElementById("submit-btn");
+
+        submitButton.setAttribute("disabled", true);
+      }
+      function enableSubmitButton() {
+        const submitButton = document.getElementById("submit-btn");
+
+        submitButton.removeAttribute("disabled");
+      }
+
+      // Preview image before upload
+      function previewImage(event) {
+        const resultDiv = document.getElementById("result");
+        resultDiv.innerHTML = ""; // Clear any previous preview
+
+        const result = document.getElementById("result");
+        result.innerHTML = `
+          <div id="loading-indicator">
+            <div class="spinner-border" id="spinner" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <div>
+              <p>Generating EEG Preview...</p>
+            </div>
+          </div>
+        `
+
+        disableSubmitButton();
+        setTimeout(async function() {
+          const form = new FormData(document.querySelector("#upload-form"));
+          const response = await fetch("/preview", {
+            method: "POST",
+            body: form,
+          });
+          const data = await response.json();
+          if (data.result != null) {
+            const imgElement = document.createElement("img");
+            imgElement.src = data.result;
+            imgElement.alt = "Uploaded Image Preview";
+            imgElement.className = "img-fluid";
+            imgElement.style.height = "100%";
+
+            resultDiv.appendChild(imgElement);
+
+            const loadingIndicator = document.getElementById("loading-indicator");
+            loadingIndicator.parentNode.removeChild(loadingIndicator);
+
+            console.log("Enabling submit button");
+            enableSubmitButton();
+          }
+        }, 0);
+      }
+
+      // Handling result display after prediction
+      async function getPrediction(event) {
+        event.preventDefault(); // Prevent form from submitting normally
+
+        const form = new FormData(document.querySelector("#upload-form"));
+        const resultDiv = document.getElementById("result");
+        resultDiv.innerHTML = ""; // Clear any previous preview
+
+        const result = document.getElementById("result");
+        result.innerHTML = `
+          <div class="spinner-border" id="spinner" role="status">
+            <span class="visually-hidden">Loading...</span>
+          </div>
+        `
+
+        await sleep(2000);
+
+        try {
+          const response = await fetch("/predict", {
+            method: "POST",
+            body: form,
+          });
+
+          const data = await response.json();
+
+          console.log({data});
+          if (data.error) {
+            resultDiv.innerHTML = `<p class='error'>Error: ${data.error}</p>`;
+          } else {
+            const value = data.result;
+
+            const isAdhdPositive = value > 0;
+            const isNotAdhdPositive = value < 0;
+            const confidence = Math.abs(value);
+            const confidenceString = `${(~~(confidence * 10000)) / 100}%`
+
+            if (isAdhdPositive) {
+              resultDiv.innerHTML = `
+                  <p>Predicted Class: <span style="color: green">ADHD</span></p>
+                  <p>Confidence: <span style="color: orange;">${confidenceString}</span></p>
+                  <p class="disclaimer">
+                    Disclaimer: This is not a definitive diagnosis.
+                  </p>
+              `;
+            } else if (isNotAdhdPositive) {
+              resultDiv.innerHTML = `
+                  <p>Predicted Class: <span style="color: blue">Non-ADHD</span></p>
+                  <p>Confidence: <span style="color: orange;">${confidenceString}</span></p>
+                  <p class="disclaimer">
+                    Disclaimer: This is not a definitive diagnosis.
+                  </p>
+              `;
+            }
+
+            // const confidence = parseFloat(data.confidence.replace("%", ""));
+
+            // if (confidence < 50) {
+            //   resultDiv.innerHTML = `<p class='error'>Confidence is too low (${data.confidence}). Unable to make a reliable prediction.</p>`;
+            // } else if (confidence >= 50 && confidence < 80) {
+            //   resultDiv.innerHTML = `
+            //                 <p>Predicted Class: <span>${data.predicted_class}</span></p>
+            //                 <p>Confidence: <span style="color: orange;">${data.confidence}</span></p>
+            //                 <p><strong>Uses:</strong> ${data.plant_use}</p>
+            //                 <p class="disclaimer">
+            //                     Disclaimer: The confidence level is moderate. Please verify the result with further analysis or expert advice.
+            //                 </p>
+            //             `;
+            // } else {
+            //   resultDiv.innerHTML = `
+            //                 <p>Predicted Class: <span>${data.predicted_class}</span></p>
+            //                 <p>Confidence: <span style="color: green;">${data.confidence}</span></p>
+            //                 <p><strong>Uses:</strong> ${data.plant_use}</p>
+            //             `;
+            // }
+          }
+        } catch (error) {
+
+          console.log({error})
+          resultDiv.innerHTML = `<p class='error'>An error occurred while processing the image. Please ensure the image is valid and try again.</p>`;
+        }
+      }
+
+      // Attach submit event to form
+      document.querySelector("#upload-form").addEventListener("submit", getPrediction);
+    </script>
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+  </body>
+</html>

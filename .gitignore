@@ -1,0 +1,9 @@
+exports
+exports_old
+extracted_eegs
+validation_data
+__pycache__
+.Trash*
+
+
+*.csv
