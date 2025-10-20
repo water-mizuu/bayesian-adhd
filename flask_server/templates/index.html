@@ -5,88 +5,175 @@
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>BayesianADHD Thesis Prototype</title>
     <link rel="stylesheet" href="static/styles.css" />
-    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css" rel="stylesheet" integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB" crossorigin="anonymous">
+    <link
+      href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/css/bootstrap.min.css"
+      rel="stylesheet"
+      integrity="sha384-sRIl4kxILFvY47J16cr9ZwB07vP4J8+LH7qKQnuqkuIAvNWLzeN8tE5YBujZqJLB"
+      crossorigin="anonymous"
+    />
   </head>
   <body>
-    <div class="container d-flex flex-column align-items-center">
+    <div class="container d-flex flex-column align-items-center gap-4">
       <h1>BayesianADHD</h1>
       <!-- Form for fupload -->
-      <div class="upload-section">
-        <form id="upload-form" action="/predict" method="POST" enctype="multipart/form-data">
+      <div class="upload-section d-flex flex-column align-items-center gap-4">
+        <form
+          id="upload-form"
+          action="/predict"
+          method="POST"
+          enctype="multipart/form-data"
+          class="d-flex flex-row align-items-center gap-4"
+        >
           <label for="file" class="btn btn-primary">Upload an EEG Recording</label>
           <input
             type="file"
             name="file"
             id="file"
             accept=".csv"
-            onchange="previewImage(event)"
+            onchange="visualizeEeg(event)"
             required
           />
           <button type="submit" id="submit-btn" class="btn btn-primary" disabled>
             Upload & Analyze
           </button>
         </form>
+        Supported file types: '.csv'
       </div>
 
       <!-- Dynamic result display -->
-      <div class="" style="height: 2em"></div>
-      <div class="result" id="result" aria-live="polite" style="height: 500px"></div>
+      <div
+        class="result d-flex flex-column align-items-center gap-4"
+        id="result"
+        aria-live="polite"
+      ></div>
+
+      <div style="margin-top: 30px; text-align: center; color: #666; font-size: 0.9rem">
+        EEG Analysis Platform v2.1
+      </div>
     </div>
 
     <script>
+      function html(...args) {
+        const holder = document.createElement("div");
+        holder.innerHTML = String.raw(...args).trim();
+
+        const children = [...holder.childNodes];
+        console.log(children);
+        if (children.length > 1) {
+          throw new Error("html should only use a single element");
+        }
+
+        return children[0];
+      }
+    </script>
+
+    <script>
       const sleep = (time) => new Promise((r, _) => setTimeout(() => r(), time));
+
+      function putLoading(message) {
+        const result = document.getElementById("result");
+        const child = html`
+          <div id="loading-indicator" class="d-flex flex-column align-items-center gap-2">
+            <div class="spinner-border" id="spinner" role="status">
+              <span class="visually-hidden">Loading...</span>
+            </div>
+            <div>
+              <p>${message}</p>
+            </div>
+          </div>
+        `;
+
+        result.appendChild(child);
+      }
+
+      function clearLoading() {
+        const loadingIndicator = document.getElementById("loading-indicator");
+        if (loadingIndicator == null) {
+          return;
+        }
+
+        loadingIndicator.parentNode.removeChild(loadingIndicator);
+      }
 
       function disableSubmitButton() {
         const submitButton = document.getElementById("submit-btn");
 
         submitButton.setAttribute("disabled", true);
       }
+
       function enableSubmitButton() {
         const submitButton = document.getElementById("submit-btn");
 
         submitButton.removeAttribute("disabled");
       }
 
-      // Preview image before upload
-      function previewImage(event) {
-        const resultDiv = document.getElementById("result");
-        resultDiv.innerHTML = ""; // Clear any previous preview
+      function removeIfIdExists(id) {
+        const existingPreview = document.getElementById(id);
+        if (existingPreview != null) {
+          existingPreview.parentNode.removeChild(existingPreview);
+        }
+      }
 
+      function clearResults() {
         const result = document.getElementById("result");
-        result.innerHTML = `
-          <div id="loading-indicator">
-            <div class="spinner-border" id="spinner" role="status">
-              <span class="visually-hidden">Loading...</span>
-            </div>
-            <div>
-              <p>Generating EEG Preview...</p>
-            </div>
-          </div>
-        `
 
+        result.innerHTML = "";
+      }
+
+      // Preview image before upload
+      function visualizeEeg(event) {
+        const result = document.getElementById("result");
+
+        clearResults();
+        putLoading("Generating EEG Preview...");
         disableSubmitButton();
-        setTimeout(async function() {
+        setTimeout(async function () {
           const form = new FormData(document.querySelector("#upload-form"));
-          const response = await fetch("/preview", {
+          const response = await fetch("/visualize_eeg/raw", {
             method: "POST",
             body: form,
           });
           const data = await response.json();
-          if (data.result != null) {
-            const imgElement = document.createElement("img");
-            imgElement.src = data.result;
-            imgElement.alt = "Uploaded Image Preview";
-            imgElement.className = "img-fluid";
-            imgElement.style.height = "100%";
 
-            resultDiv.appendChild(imgElement);
+          clearLoading();
+          if (data.result == null) return;
 
-            const loadingIndicator = document.getElementById("loading-indicator");
-            loadingIndicator.parentNode.removeChild(loadingIndicator);
+          const box = (() => {
+            const f = event.target.files?.[0];
+            if (!f) return "";
+            const ext = f.name.includes(".") ? f.name.split(".").pop() : "";
+            const humanSize = ((s) => {
+              if (s < 1024) return `${s} B`;
+              if (s < 1024 * 1024) return `${Math.round((s / 1024) * 100) / 100} KB`;
+              return `${Math.round((s / (1024 * 1024)) * 100) / 100} MB`;
+            })(f.size);
 
-            console.log("Enabling submit button");
-            enableSubmitButton();
-          }
+            return html`
+              <div id="file-information" class="container">
+                <h4>File Information:</h4>
+                <p><b>Name:</b> ${f.name}</p>
+                <p><b>Extension:</b> ${ext}</p>
+                <p><b>Size:</b> ${humanSize}</p>
+              </div>
+            `;
+          })();
+          result.appendChild(box);
+
+          const imgElement = html`
+            <div class="container">
+              <h4>Rendered EEG Preview</h4>
+              <img
+                src=${data.result}
+                alt="Uploaded Image Preview"
+                id="eeg-preview"
+                class="img-fluid"
+                style="height: 450px"
+              />
+            </div>
+          `;
+          result.appendChild(imgElement);
+
+          enableSubmitButton();
         }, 0);
       }
 
@@ -95,18 +182,12 @@
         event.preventDefault(); // Prevent form from submitting normally
 
         const form = new FormData(document.querySelector("#upload-form"));
-        const resultDiv = document.getElementById("result");
-        resultDiv.innerHTML = ""; // Clear any previous preview
+        clearResults();
 
         const result = document.getElementById("result");
-        result.innerHTML = `
-          <div class="spinner-border" id="spinner" role="status">
-            <span class="visually-hidden">Loading...</span>
-          </div>
-        `
+        putLoading("Classifying uploaded EEG...");
 
-        await sleep(2000);
-
+        await sleep(1000);
         try {
           const response = await fetch("/predict", {
             method: "POST",
@@ -115,59 +196,106 @@
 
           const data = await response.json();
 
-          console.log({data});
+          clearLoading();
           if (data.error) {
-            resultDiv.innerHTML = `<p class='error'>Error: ${data.error}</p>`;
+            result.innerHTML = `<p class='error'>Error: ${data.error}</p>`;
           } else {
             const value = data.result;
 
             const isAdhdPositive = value > 0;
             const isNotAdhdPositive = value < 0;
             const confidence = Math.abs(value);
-            const confidenceString = `${(~~(confidence * 10000)) / 100}%`
+            const confidenceString = `${~~(confidence * 10000) / 100}%`;
+
+            result.appendChild(html`<hr />`)
 
             if (isAdhdPositive) {
-              resultDiv.innerHTML = `
+              result.appendChild(html`
+                <div>
                   <p>Predicted Class: <span style="color: green">ADHD</span></p>
                   <p>Confidence: <span style="color: orange;">${confidenceString}</span></p>
-                  <p class="disclaimer">
-                    Disclaimer: This is not a definitive diagnosis.
-                  </p>
-              `;
+                  <p class="disclaimer">Disclaimer: This is not a definitive diagnosis.</p>
+                </div>
+              `);
             } else if (isNotAdhdPositive) {
-              resultDiv.innerHTML = `
+              result.appendChild(html`
+                <div>
                   <p>Predicted Class: <span style="color: blue">Non-ADHD</span></p>
                   <p>Confidence: <span style="color: orange;">${confidenceString}</span></p>
-                  <p class="disclaimer">
-                    Disclaimer: This is not a definitive diagnosis.
-                  </p>
-              `;
+                  <p class="disclaimer">Disclaimer: This is not a definitive diagnosis.</p>
+                </div>
+              `);
             }
 
-            // const confidence = parseFloat(data.confidence.replace("%", ""));
+            result.appendChild(html`<h3>Clinical EEG Analysis Report</h3>`);
 
-            // if (confidence < 50) {
-            //   resultDiv.innerHTML = `<p class='error'>Confidence is too low (${data.confidence}). Unable to make a reliable prediction.</p>`;
-            // } else if (confidence >= 50 && confidence < 80) {
-            //   resultDiv.innerHTML = `
-            //                 <p>Predicted Class: <span>${data.predicted_class}</span></p>
-            //                 <p>Confidence: <span style="color: orange;">${data.confidence}</span></p>
-            //                 <p><strong>Uses:</strong> ${data.plant_use}</p>
-            //                 <p class="disclaimer">
-            //                     Disclaimer: The confidence level is moderate. Please verify the result with further analysis or expert advice.
-            //                 </p>
-            //             `;
-            // } else {
-            //   resultDiv.innerHTML = `
-            //                 <p>Predicted Class: <span>${data.predicted_class}</span></p>
-            //                 <p>Confidence: <span style="color: green;">${data.confidence}</span></p>
-            //                 <p><strong>Uses:</strong> ${data.plant_use}</p>
-            //             `;
-            // }
+            const toPrint = [
+              {
+                name: "Raw EEG",
+                link: "/visualize_eeg/raw",
+                description: "This is the actual EEG recording based on the uploaded information. Artifcats such as recording noise are still present.",
+              },
+              {
+                name: "Filtered EEG (0.5Hz - 40Hz)",
+                link: "/visualize_eeg/filtered",
+                description: "This is the filtered EEG recording, keeping 0.5Hz - 40Hz.",
+              },
+              {
+                name: "Delta Waves (0.5Hz - 4Hz)",
+                link: "/visualize_eeg/delta",
+                description: "",
+              },
+              {
+                name: "Theta Waves (4Hz - 8Hz)",
+                link: "/visualize_eeg/theta",
+                description: "",
+              },
+              {
+                name: "Alpha Waves (8Hz - 12Hz)",
+                link: "/visualize_eeg/alpha",
+                description: "",
+              },
+              {
+                name: "Beta Waves (12Hz - 30Hz)",
+                link: "/visualize_eeg/beta",
+                description: "",
+              },
+              {
+                name: "Gamma Waves (30Hz - 40Hz)",
+                link: "/visualize_eeg/gamma",
+                description: "",
+              },
+            ];
+
+            for (const {name, link, description} of toPrint) {
+              const node = html`
+                <div class="container d-flex flex-column gap-2">
+                  <h4>${name}</h4>
+                  <p>${description}</p>
+                  <div class="img-holder"></div>
+                </div>
+              `;
+
+              result.appendChild(node);
+
+              const imageHolder = node.querySelector(".img-holder");
+              fetch(link, {
+                method: "POST",
+                body: form,
+              }).then(e => e.json())
+                .then(e => html`
+                  <img
+                    src=${e.result}
+                    alt="Uploaded Image Preview"
+                    id="eeg-preview"
+                    class="img-fluid"
+                    style="height: 450px"
+                  />`)
+                .then(e => imageHolder.appendChild(e));
+            }
           }
         } catch (error) {
-
-          console.log({error})
+          console.log({ error });
           resultDiv.innerHTML = `<p class='error'>An error occurred while processing the image. Please ensure the image is valid and try again.</p>`;
         }
       }
@@ -175,6 +303,10 @@
       // Attach submit event to form
       document.querySelector("#upload-form").addEventListener("submit", getPrediction);
     </script>
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js" integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI" crossorigin="anonymous"></script>
+    <script
+      src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.8/dist/js/bootstrap.bundle.min.js"
+      integrity="sha384-FKyoEForCGlyvwx9Hj09JcYn3nv7wiPVlz7YYwJrWVcXK/BmnVDxM+D2scQbITxI"
+      crossorigin="anonymous"
+    ></script>
   </body>
 </html>

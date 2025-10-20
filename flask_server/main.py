@@ -16,8 +16,10 @@ import pandas as pd
 import matplotlib.pyplot as plt
 
 import matplotlib
-
 matplotlib.use('Agg')  # Non-GUI backend
+
+from threader import threaded
+
 
 # Initialize the Flask app
 app = Flask(__name__)
@@ -92,25 +94,91 @@ def load_model():
     model.load_state_dict(weights)
     model.eval()
 
-def preview_df(df: pd.DataFrame):
+import numpy as np
+import pandas as pd
+from scipy.signal import butter, filtfilt
+
+SAMPLE_RATE = 256  # Hz, adjust to your data
+
+# def butter_bandpass(lowcut, highcut, fs, order=5):
+#     nyquist = 0.5 * fs
+#     low = lowcut / nyquist if lowcut is not None else 0
+#     high = highcut / nyquist if highcut is not None else 1
+
+#     return butter(order, [low, high], btype='band', analog=False)
+
+# def filter_df(df: pd.DataFrame, low=None, high=None, order=5):
+#     if low is None and high is None:
+#         return df
+
+#     df = df.copy()
+#     electrode_columns = df.select_dtypes(include=[np.number]).columns
+#     b, a = butter_bandpass(low, high, SAMPLE_RATE, order=order)
+
+#     for electrode in electrode_columns:
+#         signal = df[electrode].to_numpy()
+#         filtered_signal = filtfilt(b, a, signal)
+#         df[electrode] = filtered_signal
+
+#     return df
+
+def filter_df(df: pd.DataFrame, low=None, high=None):
+    df = df.copy()
+
+    electrode_columns = df.select_dtypes(include=[np.number]).columns
+    n = len(df)
+    freqs = np.fft.rfftfreq(n, d=1 / SAMPLE_RATE)
+
+    # compute power spectra for all electrodes
+    for electrode in electrode_columns:
+        signal = df[electrode].to_numpy()
+        fft_vals = np.fft.rfft(signal)
+
+        # Create a frequency mask
+        mask = np.ones_like(freqs, dtype=bool)
+        if low is not None:
+            mask &= freqs >= low
+        if high is not None:
+            mask &= freqs <= high
+        # Apply mask (zero out unwanted frequencies)
+        fft_vals[~mask] = 0
+        df[electrode]  = np.fft.irfft(fft_vals, n=n)
+
+    return df
+
+@threaded
+def visualize_df(df: pd.DataFrame, type: str):
+    low, high = (0.5, 40)    if type == "filtered" else \
+                (0.5, 4)     if type == "delta" else \
+                (4, 8)       if type == "theta" else \
+                (8, 12)      if type == "alpha" else \
+                (12, 30)     if type == "beta" else \
+                (30, 40)     if type == "gamma" else \
+                (None, None)
+
     ch_names = df.select_dtypes(include=[np.number]).columns.tolist()
     ch_types = ['eeg'] * len(ch_names)
-    filtered_data = df.to_numpy().T
+    filtered_data = filter_df(df, low=low, high=high).to_numpy().T
+
     # Visualize the cleaned EEG data.
     info = mne.create_info(ch_names=ch_names, sfreq=SAMPLE_RATE, ch_types=ch_types)
     filtered = mne.io.RawArray(filtered_data, info)
 
     buf = io.BytesIO()
 
+    # Calculate duration in seconds, ensure at least 1 second and handle edge cases
+    duration_seconds = int(max(1.0, min(1_000.0, len(df) / SAMPLE_RATE)))
+    print({'duration': duration_seconds})
+
     fig = filtered.plot(scalings='auto',
                         n_channels=len(ch_names),
+                        duration=duration_seconds,
                         show=False,
                         show_scrollbars=False,
                         show_options=False,
                         clipping=None,
-                        block=False,
-                        )
-    fig.savefig(buf, format="png", dpi=300)
+                        block=False)
+    fig.savefig(buf, format="png", dpi=300,)
     plt.close(fig)
     buf.seek(0)
 
@@ -118,13 +186,9 @@ def preview_df(df: pd.DataFrame):
 
     return f"data:image/png;base64,{img_base64}"
 
-class WindowOutput(TypedDict):
-    window: int
-    frequency: np.floating
-    electrodes: list[np.ndarray]
 
 def process_window(window: pd.DataFrame, window_count: int):
-    output: list[WindowOutput] = []
+    output = []
     electrode_columns = window.select_dtypes(include=[np.number]).columns
 
     n = len(window)
@@ -190,7 +254,7 @@ def classify_df(df: pd.DataFrame):
             return float(-control)
 
 
-def preview_csv(file: FileStorage):
+def visualize_csv(file: FileStorage, type: str):
     binary = file.stream.read()
     try:
         csv_string = binary.decode('utf-8')
@@ -202,7 +266,7 @@ def preview_csv(file: FileStorage):
     df = pd.read_csv(csv_io)
     csv_io.close()
 
-    return preview_df(df)
+    return visualize_df(df, type)
 
 def process_csv(file: FileStorage):
     binary = file.stream.read()
@@ -220,15 +284,16 @@ def process_csv(file: FileStorage):
 
 
 @error_handle
-def preview_file(file: FileStorage):
+def visualize_file(file: FileStorage, type="raw"):
     if file.filename is None:
         return None
 
     *_, ext = file.filename.split(".")
+    print(f"VISUALIZE FILE, {ext}")
 
     match ext:
         case "csv":
-            return preview_csv(file)
+            return visualize_csv(file, type)
         case _:
             return {'error': 'File extension not supported'}
 
@@ -252,8 +317,8 @@ def process_file(file: FileStorage):
 def home():
     return render_template('index.html')  # Render the home page with upload form
 
-@app.route('/preview', methods=['POST'])
-def preview():
+@app.route('/visualize_eeg/<type>', methods=['POST'])
+def visualize_eeg(type):
     if 'file' not in request.files:
         return jsonify({'error': 'No file part'})
 
@@ -261,7 +326,7 @@ def preview():
     if file.filename == '':
         return jsonify({'error': 'No selected file'}), 400
 
-    match preview_file(file):
+    match visualize_file(file, type):
         case None:
             return jsonify({'error': 'Something went wrong while reading the file.'}), 500
         case {'error': error}:
@@ -291,4 +356,7 @@ if __name__ == '__main__':
     DEBUG = True
     load_scaler()
     load_model()
-    app.run(debug=DEBUG, port=int(os.getenv('PORT', 5000)))
+
+    pytorch_total_params = sum(p.numel() for p in model.parameters())
+    print(pytorch_total_params)
+    app.run(debug=DEBUG, port=int(os.getenv('PORT', 5000)), threaded=True)
