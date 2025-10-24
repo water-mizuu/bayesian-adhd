@@ -22,9 +22,9 @@
           action="/predict"
           method="POST"
           enctype="multipart/form-data"
-          class="d-flex flex-row align-items-center gap-4"
+          class="d-flex flex-row align-items-center gap-4 justify-content-between"
         >
-          <label for="file" class="btn btn-primary">Upload an EEG Recording</label>
+          <label for="file" class="btn btn-primary flex-fill">Upload an EEG Recording</label>
           <input
             type="file"
             name="file"
@@ -33,7 +33,7 @@
             onchange="visualizeEeg(event)"
             required
           />
-          <button type="submit" id="submit-btn" class="btn btn-primary" disabled>
+          <button type="submit" id="submit-btn" class="btn btn-primary flex-fill" disabled>
             Upload & Analyze
           </button>
         </form>
@@ -209,9 +209,10 @@
 
             result.appendChild(html`<hr />`)
 
+            result.appendChild(html`<h3>Model Diagnosis</h3>`);
             if (isAdhdPositive) {
               result.appendChild(html`
-                <div>
+                <div class="container">
                   <p>Predicted Class: <span style="color: green">ADHD</span></p>
                   <p>Confidence: <span style="color: orange;">${confidenceString}</span></p>
                   <p class="disclaimer">Disclaimer: This is not a definitive diagnosis.</p>
@@ -219,7 +220,7 @@
               `);
             } else if (isNotAdhdPositive) {
               result.appendChild(html`
-                <div>
+                <div class="container">
                   <p>Predicted Class: <span style="color: blue">Non-ADHD</span></p>
                   <p>Confidence: <span style="color: orange;">${confidenceString}</span></p>
                   <p class="disclaimer">Disclaimer: This is not a definitive diagnosis.</p>
@@ -231,40 +232,40 @@
 
             const toPrint = [
               {
-                name: "Raw EEG",
-                link: "/visualize_eeg/raw",
-                description: "This is the actual EEG recording based on the uploaded information. Artifcats such as recording noise are still present.",
+                "name": "Raw EEG",
+                "link": "/visualize_eeg/raw",
+                "description": "This is the actual EEG recording based on the uploaded information. Artifacts such as recording noise are still present."
               },
               {
-                name: "Filtered EEG (0.5Hz - 40Hz)",
-                link: "/visualize_eeg/filtered",
-                description: "This is the filtered EEG recording, keeping 0.5Hz - 40Hz.",
+                "name": "Filtered EEG (0.5Hz - 40Hz)",
+                "link": "/visualize_eeg/filtered",
+                "description": "This is the EEG recording after applying a bandpass filter from 0.5Hz to 40Hz to remove slow drifts and high-frequency noise."
               },
               {
-                name: "Delta Waves (0.5Hz - 4Hz)",
-                link: "/visualize_eeg/delta",
-                description: "",
+                "name": "Delta Waves (0.5Hz - 4Hz)",
+                "link": "/visualize_eeg/delta",
+                "description": "Delta activity reflects slow-wave oscillations typically associated with deep sleep and unconscious states."
               },
               {
-                name: "Theta Waves (4Hz - 8Hz)",
-                link: "/visualize_eeg/theta",
-                description: "",
+                "name": "Theta Waves (4Hz - 8Hz)",
+                "link": "/visualize_eeg/theta",
+                "description": "Theta activity is linked to drowsiness, light sleep, and states of relaxation or meditation."
               },
               {
-                name: "Alpha Waves (8Hz - 12Hz)",
-                link: "/visualize_eeg/alpha",
-                description: "",
+                "name": "Alpha Waves (8Hz - 12Hz)",
+                "link": "/visualize_eeg/alpha",
+                "description": "Alpha activity is prominent during relaxed wakefulness, especially with eyes closed, and decreases with mental effort."
               },
               {
-                name: "Beta Waves (12Hz - 30Hz)",
-                link: "/visualize_eeg/beta",
-                description: "",
+                "name": "Beta Waves (12Hz - 30Hz)",
+                "link": "/visualize_eeg/beta",
+                "description": "Beta activity is associated with active thinking, attention, and problem-solving, often present during alert states."
               },
               {
-                name: "Gamma Waves (30Hz - 40Hz)",
-                link: "/visualize_eeg/gamma",
-                description: "",
-              },
+                "name": "Gamma Waves (30Hz - 40Hz)",
+                "link": "/visualize_eeg/gamma",
+                "description": "Gamma activity corresponds to high-level cognitive functions such as perception, memory, and consciousness."
+              }
             ];
 
             for (const {name, link, description} of toPrint) {

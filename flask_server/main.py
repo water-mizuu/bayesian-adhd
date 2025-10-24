@@ -9,6 +9,7 @@ import torch
 
 import io
 import mne
+import math
 import pickle
 import base64
 import numpy as np
@@ -98,87 +99,88 @@ import numpy as np
 import pandas as pd
 from scipy.signal import butter, filtfilt
 
-SAMPLE_RATE = 256  # Hz, adjust to your data
-
-# def butter_bandpass(lowcut, highcut, fs, order=5):
-#     nyquist = 0.5 * fs
-#     low = lowcut / nyquist if lowcut is not None else 0
-#     high = highcut / nyquist if highcut is not None else 1
-
-#     return butter(order, [low, high], btype='band', analog=False)
-
-# def filter_df(df: pd.DataFrame, low=None, high=None, order=5):
-#     if low is None and high is None:
-#         return df
-
-#     df = df.copy()
-#     electrode_columns = df.select_dtypes(include=[np.number]).columns
-#     b, a = butter_bandpass(low, high, SAMPLE_RATE, order=order)
-
-#     for electrode in electrode_columns:
-#         signal = df[electrode].to_numpy()
-#         filtered_signal = filtfilt(b, a, signal)
-#         df[electrode] = filtered_signal
-
-#     return df
-
-def filter_df(df: pd.DataFrame, low=None, high=None):
+def bandpass_df(df: pd.DataFrame, low=None, high=None, order=4, window_sec=1):
     df = df.copy()
+    numeric_cols = df.select_dtypes(include=[np.number]).columns
+    n_samples = len(df)
+    window_size = int(window_sec * SAMPLE_RATE)
 
-    electrode_columns = df.select_dtypes(include=[np.number]).columns
-    n = len(df)
-    freqs = np.fft.rfftfreq(n, d=1 / SAMPLE_RATE)
+    nyquist = 0.5 * SAMPLE_RATE
+    if low is None and high is None:
+        return df
 
-    # compute power spectra for all electrodes
-    for electrode in electrode_columns:
-        signal = df[electrode].to_numpy()
-        fft_vals = np.fft.rfft(signal)
+    # Normalized cutoffs
+    low_cut = low / nyquist if low else None
+    high_cut = high / nyquist if high else None
 
-        # Create a frequency mask
-        mask = np.ones_like(freqs, dtype=bool)
-        if low is not None:
-            mask &= freqs >= low
-        if high is not None:
-            mask &= freqs <= high
-        # Apply mask (zero out unwanted frequencies)
-        fft_vals[~mask] = 0
-        df[electrode]  = np.fft.irfft(fft_vals, n=n)
+    # Filter design
+    if low_cut and high_cut:
+        btype, Wn = 'band', [low_cut, high_cut]
+    elif low_cut:
+        btype, Wn = 'highpass', low_cut
+    elif high_cut:
+        btype, Wn = 'lowpass', high_cut
+
+    b, a = butter(order, Wn, btype=btype)
+
+    # Apply filter in 1-second windows
+    for col in numeric_cols:
+        signal = df[col].to_numpy()
+        filtered = np.zeros_like(signal)
+
+        for start in range(0, n_samples, window_size):
+            end = min(start + window_size, n_samples)
+            segment = signal[start:end]
+
+            # Avoid errors for very short trailing segments
+            if len(segment) < order * 3:
+                filtered[start:end] = segment
+                continue
+
+            filtered[start:end] = filtfilt(b, a, segment, method="gust")
+
+        df[col] = filtered
 
     return df
 
 @threaded
-def visualize_df(df: pd.DataFrame, type: str):
-    low, high = (0.5, 40)    if type == "filtered" else \
-                (0.5, 4)     if type == "delta" else \
-                (4, 8)       if type == "theta" else \
-                (8, 12)      if type == "alpha" else \
-                (12, 30)     if type == "beta" else \
-                (30, 40)     if type == "gamma" else \
+def visualize_df(df: pd.DataFrame, eeg_type: str):
+    low, high = (0.5, 40)    if eeg_type == "filtered" else \
+                (0.5, 4)     if eeg_type == "delta" else \
+                (4, 8)       if eeg_type == "theta" else \
+                (8, 12)      if eeg_type == "alpha" else \
+                (12, 30)     if eeg_type == "beta" else \
+                (30, 40)     if eeg_type == "gamma" else \
                 (None, None)
 
     ch_names = df.select_dtypes(include=[np.number]).columns.tolist()
     ch_types = ['eeg'] * len(ch_names)
-    filtered_data = filter_df(df, low=low, high=high).to_numpy().T
+
+    # df = df - df.mean()  # remove DC offset
+    # df = df / df.abs().max() * 100  # rescale to ~±100 µV range for plotting
+    df = bandpass_df(df, low=low, high=high)
+    df = df.to_numpy().T
 
     # Visualize the cleaned EEG data.
     info = mne.create_info(ch_names=ch_names, sfreq=SAMPLE_RATE, ch_types=ch_types)
-    filtered = mne.io.RawArray(filtered_data, info)
+    print("INFO: ", info)
 
+    _, sample_count = df.shape
+    duration = sample_count / SAMPLE_RATE
+    filtered = mne.io.RawArray(df, info)
+    print(duration)
     buf = io.BytesIO()
-
-    # Calculate duration in seconds, ensure at least 1 second and handle edge cases
-    duration_seconds = int(max(1.0, min(1_000.0, len(df) / SAMPLE_RATE)))
-    print({'duration': duration_seconds})
-
     fig = filtered.plot(scalings='auto',
+                        duration=30.0,
                         n_channels=len(ch_names),
-                        duration=duration_seconds,
                         show=False,
                         show_scrollbars=False,
                         show_options=False,
                         clipping=None,
                         block=False)
-    fig.savefig(buf, format="png", dpi=300,)
+
+    fig.set_size_inches(math.ceil(duration / 6), 6)
+    fig.savefig(buf, format="png", dpi=600)
     plt.close(fig)
     buf.seek(0)
 
@@ -330,6 +332,7 @@ def visualize_eeg(type):
         case None:
             return jsonify({'error': 'Something went wrong while reading the file.'}), 500
         case {'error': error}:
+            print(error)
             return jsonify({'error': error}), 504
         case result:
             return jsonify({'result': result}), 200
