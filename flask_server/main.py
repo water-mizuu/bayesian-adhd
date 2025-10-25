@@ -285,6 +285,116 @@ def process_csv(file: FileStorage):
     return classify_df(df)
 
 
+def compute_band_powers(df: pd.DataFrame):
+    """
+    Compute absolute and relative power for each frequency band.
+    
+    Frequency bands:
+    - Delta: 0.5-4 Hz
+    - Theta: 4-8 Hz
+    - Alpha: 8-13 Hz
+    - Beta: 13-30 Hz
+    - Gamma: 30-60 Hz
+    
+    Returns:
+    --------
+    dict : Contains absolute and relative power for each band and electrode
+    """
+    from scipy.signal import welch
+    
+    # Define frequency bands
+    bands = {
+        'delta': (0.5, 4),
+        'theta': (4, 8),
+        'alpha': (8, 13),
+        'beta': (13, 30),
+        'gamma': (30, 60)
+    }
+    
+    electrodes = df.select_dtypes(include=[np.number]).columns.tolist()
+    result = {
+        'absolute_power': {},
+        'relative_power': {},
+        'total_power': {},
+        'band_ratios': {}
+    }
+    
+    for electrode in electrodes:
+        signal = df[electrode].to_numpy()
+        
+        # Compute power spectral density using Welch's method
+        freqs, psd = welch(signal, fs=SAMPLE_RATE, nperseg=min(256, len(signal)//4))
+        
+        # Compute absolute power for each band
+        absolute_powers = {}
+        for band_name, (low, high) in bands.items():
+            # Find frequencies in this band
+            band_mask = (freqs >= low) & (freqs < high)
+            # Integrate power in this band using trapezoidal rule
+            band_power = np.trapz(psd[band_mask], freqs[band_mask])
+            absolute_powers[band_name] = float(band_power)
+        
+        # Compute total power across all bands
+        total_power = sum(absolute_powers.values())
+        
+        # Compute relative power (as fraction of total)
+        relative_powers = {
+            band_name: (power / total_power) if total_power > 0 else 0.0
+            for band_name, power in absolute_powers.items()
+        }
+        
+        # Store results for this electrode
+        result['absolute_power'][electrode] = absolute_powers
+        result['relative_power'][electrode] = relative_powers
+        result['total_power'][electrode] = float(total_power)
+    
+    # Compute average across all electrodes
+    result['average_absolute_power'] = {
+        band: np.mean([result['absolute_power'][elec][band] for elec in electrodes])
+        for band in bands.keys()
+    }
+    
+    result['average_relative_power'] = {
+        band: np.mean([result['relative_power'][elec][band] for elec in electrodes])
+        for band in bands.keys()
+    }
+    
+    # Compute clinically relevant ratios
+    avg_theta = result['average_absolute_power']['theta']
+    avg_beta = result['average_absolute_power']['beta']
+    avg_alpha = result['average_absolute_power']['alpha']
+    
+    result['band_ratios'] = {
+        'theta_beta_ratio': float(avg_theta / avg_beta) if avg_beta > 0 else 0.0,
+        'theta_alpha_ratio': float(avg_theta / avg_alpha) if avg_alpha > 0 else 0.0,
+        'alpha_theta_ratio': float(avg_alpha / avg_theta) if avg_theta > 0 else 0.0
+    }
+    
+    return result
+
+
+def analyze_csv_bands(file: FileStorage):
+    """Process CSV file and return band power analysis."""
+    binary = file.stream.read()
+    try:
+        csv_string = binary.decode('utf-8')
+        csv_string = csv_string.replace('\r', '')
+    except UnicodeDecodeError:
+        return {'error': 'Could not decode file content as UTF-8'}, 500
+
+    csv_io = io.StringIO(csv_string)
+    df = pd.read_csv(csv_io)
+    csv_io.close()
+    
+    # Clean the data first
+    print("📊 Preprocessing EEG data for band analysis...")
+    
+    # Compute band powers
+    band_powers = compute_band_powers(df)
+    
+    return band_powers
+
+
 @error_handle
 def visualize_file(file: FileStorage, type="raw"):
     if file.filename is None:
@@ -353,6 +463,47 @@ def predict():
             return jsonify({'error': error}), 504
         case result:
             return jsonify({'prediction': True, 'result': result}), 200
+
+
+@app.route('/analyze_bands', methods=['POST'])
+def analyze_bands():
+    """
+    API endpoint to compute absolute and relative power for each frequency band.
+
+    Returns:
+    --------
+    JSON with:
+    - absolute_power: Power in each band for each electrode (μV²)
+    - relative_power: Power as fraction of total (0-1) for each electrode
+    - total_power: Total power across all bands for each electrode
+    - average_absolute_power: Average across all electrodes for each band
+    - average_relative_power: Average relative power across all electrodes
+    - band_ratios: Clinically relevant ratios (theta/beta, etc.)
+    """
+    if 'file' not in request.files:
+        return jsonify({'error': 'No file part'}), 400
+
+    file = request.files['file']
+    if file.filename == '':
+        return jsonify({'error': 'No selected file'}), 400
+
+    if not allowed_file(file.filename):
+        return jsonify({'error': 'File type not allowed. Please upload a CSV file.'}), 400
+
+    try:
+        result = analyze_csv_bands(file)
+
+        if isinstance(result, tuple) and len(result) == 2:
+            # Error case
+            error_dict, status_code = result
+            return jsonify(error_dict), status_code
+
+        return jsonify(result), 200
+
+    except Exception as e:
+        print(f"Error in analyze_bands: {str(e)}")
+        return jsonify({'error': f'Failed to analyze bands: {str(e)}'}), 500
+
 
 if __name__ == '__main__':
     import os

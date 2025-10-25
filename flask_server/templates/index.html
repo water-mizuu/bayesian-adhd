@@ -47,6 +47,57 @@
         aria-live="polite"
       ></div>
 
+      <!-- Band Power Analysis Section -->
+      <div class="container mt-4" id="band-analysis-section" style="display: none;">
+        <h3 class="text-center mb-3">Frequency Band Power Analysis</h3>
+        
+        <!-- Average Powers -->
+        <div class="row mb-4">
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header bg-primary text-white">
+                <h5 class="mb-0">Average Relative Power (%)</h5>
+              </div>
+              <div class="card-body">
+                <div id="relative-power-bars"></div>
+              </div>
+            </div>
+          </div>
+          <div class="col-md-6">
+            <div class="card">
+              <div class="card-header bg-info text-white">
+                <h5 class="mb-0">Clinical Ratios</h5>
+              </div>
+              <div class="card-body">
+                <div id="clinical-ratios"></div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <!-- Band breakdown -->
+        <div class="card mb-4">
+          <div class="card-header bg-success text-white">
+            <h5 class="mb-0">Frequency Band Distribution</h5>
+          </div>
+          <div class="card-body">
+            <div class="row" id="band-breakdown">
+              <!-- Will be populated dynamically -->
+            </div>
+          </div>
+        </div>
+
+        <!-- ADHD Indicators -->
+        <div class="card mb-4" id="adhd-indicators-card">
+          <div class="card-header bg-warning text-dark">
+            <h5 class="mb-0">⚡ ADHD Indicators</h5>
+          </div>
+          <div class="card-body" id="adhd-indicators">
+            <!-- Will be populated dynamically -->
+          </div>
+        </div>
+      </div>
+
       <div style="margin-top: 30px; text-align: center; color: #666; font-size: 0.9rem">
         EEG Analysis Platform v2.1
       </div>
@@ -234,37 +285,37 @@
               {
                 "name": "Raw EEG",
                 "link": "/visualize_eeg/raw",
-                "description": "This is the actual EEG recording based on the uploaded information. Artifacts such as recording noise are still present."
+                "description": "This is the unprocessed EEG signal as recorded, containing all frequency components and artifacts. It serves as the baseline reference for examining ADHD-related neural activity."
               },
               {
                 "name": "Filtered EEG (0.5Hz - 40Hz)",
                 "link": "/visualize_eeg/filtered",
-                "description": "This is the EEG recording after applying a bandpass filter from 0.5Hz to 40Hz to remove slow drifts and high-frequency noise."
+                "description": "This is the EEG signal after bandpass filtering between 0.5Hz and 40Hz, removing slow drifts and high-frequency noise. This cleaned range is typically used for ADHD research and power spectrum analysis."
               },
               {
                 "name": "Delta Waves (0.5Hz - 4Hz)",
                 "link": "/visualize_eeg/delta",
-                "description": "Delta activity reflects slow-wave oscillations typically associated with deep sleep and unconscious states."
+                "description": "Delta waves represent the slowest brain rhythms, dominant during deep sleep and brain rest. In ADHD research, excessive delta activity may indicate delayed cortical maturation or underarousal, though it is less consistently altered than theta activity."
               },
               {
                 "name": "Theta Waves (4Hz - 8Hz)",
                 "link": "/visualize_eeg/theta",
-                "description": "Theta activity is linked to drowsiness, light sleep, and states of relaxation or meditation."
+                "description": "Theta waves are slow oscillations linked to drowsiness, inattention, and memory processing. In ADHD, elevated theta power is one of the most frequently reported findings and contributes to the increased theta/beta ratio seen in many patients."
               },
               {
                 "name": "Alpha Waves (8Hz - 12Hz)",
                 "link": "/visualize_eeg/alpha",
-                "description": "Alpha activity is prominent during relaxed wakefulness, especially with eyes closed, and decreases with mental effort."
+                "description": "Alpha waves are moderate-frequency rhythms associated with relaxed wakefulness and sensory inhibition. In ADHD, altered alpha modulation suggests difficulties in maintaining task-related attention and cortical inhibition."
               },
               {
                 "name": "Beta Waves (12Hz - 30Hz)",
                 "link": "/visualize_eeg/beta",
-                "description": "Beta activity is associated with active thinking, attention, and problem-solving, often present during alert states."
+                "description": "Beta waves are faster rhythms related to alertness, focus, and cognitive control. In ADHD, reduced beta activity has been observed, contributing to higher theta/beta ratios and reflecting lower cortical activation levels."
               },
               {
                 "name": "Gamma Waves (30Hz - 40Hz)",
                 "link": "/visualize_eeg/gamma",
-                "description": "Gamma activity corresponds to high-level cognitive functions such as perception, memory, and consciousness."
+                "description": "Gamma waves are high-frequency oscillations tied to sensory binding, working memory, and cognitive integration. Some ADHD studies show atypical gamma synchronization, suggesting altered neural communication during attention tasks."
               }
             ];
 
@@ -294,11 +345,153 @@
                   />`)
                 .then(e => imageHolder.appendChild(e));
             }
+
+            // Fetch and display band power analysis
+            await fetchBandPowerAnalysis(form);
           }
         } catch (error) {
           console.log({ error });
           resultDiv.innerHTML = `<p class='error'>An error occurred while processing the image. Please ensure the image is valid and try again.</p>`;
         }
+      }
+
+      // Function to fetch and display band power analysis
+      async function fetchBandPowerAnalysis(formData) {
+        try {
+          const response = await fetch("/analyze_bands", {
+            method: "POST",
+            body: formData,
+          });
+
+          if (!response.ok) {
+            console.error('Band analysis failed:', response.status);
+            return;
+          }
+
+          const data = await response.json();
+          displayBandPowerAnalysis(data);
+        } catch (error) {
+          console.error('Error fetching band analysis:', error);
+        }
+      }
+
+      // Function to display band power analysis results
+      function displayBandPowerAnalysis(data) {
+        // Show the band analysis section
+        document.getElementById('band-analysis-section').style.display = 'block';
+
+        // Define colors for bands
+        const bandColors = {
+          delta: '#9C27B0',
+          theta: '#2196F3',
+          alpha: '#4CAF50',
+          beta: '#FF9800',
+          gamma: '#F44336'
+        };
+
+        // Display relative power bars
+        const relativePowerDiv = document.getElementById('relative-power-bars');
+        relativePowerDiv.innerHTML = '';
+        
+        const bands = Object.keys(data.average_relative_power);
+        bands.forEach(band => {
+          const percentage = (data.average_relative_power[band] * 100).toFixed(1);
+          const barHtml = `
+            <div class="mb-2">
+              <div class="d-flex justify-content-between">
+                <span><strong>${band.charAt(0).toUpperCase() + band.slice(1)}</strong></span>
+                <span>${percentage}%</span>
+              </div>
+              <div class="progress" style="height: 25px;">
+                <div class="progress-bar" role="progressbar" 
+                     style="width: ${percentage}%; background-color: ${bandColors[band]};"
+                     aria-valuenow="${percentage}" aria-valuemin="0" aria-valuemax="100">
+                </div>
+              </div>
+            </div>
+          `;
+          relativePowerDiv.innerHTML += barHtml;
+        });
+
+        // Display clinical ratios
+        const ratiosDiv = document.getElementById('clinical-ratios');
+        ratiosDiv.innerHTML = '';
+        
+        const ratios = data.band_ratios;
+        Object.keys(ratios).forEach(ratio => {
+          const value = ratios[ratio].toFixed(3);
+          const name = ratio.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase());
+          ratiosDiv.innerHTML += `
+            <div class="d-flex justify-content-between mb-2 p-2 border-bottom">
+              <span><strong>${name}:</strong></span>
+              <span class="badge bg-primary">${value}</span>
+            </div>
+          `;
+        });
+
+        // Display band breakdown
+        const breakdownDiv = document.getElementById('band-breakdown');
+        breakdownDiv.innerHTML = '';
+        
+        bands.forEach(band => {
+          const relPower = (data.average_relative_power[band] * 100).toFixed(1);
+          const absPower = data.average_absolute_power[band].toExponential(2);
+          
+          breakdownDiv.innerHTML += `
+            <div class="col-md-4 mb-3">
+              <div class="card h-100" style="border-left: 4px solid ${bandColors[band]};">
+                <div class="card-body">
+                  <h6 class="card-title" style="color: ${bandColors[band]};">
+                    ${band.charAt(0).toUpperCase() + band.slice(1)}
+                  </h6>
+                  <p class="card-text mb-1"><small>Relative: ${relPower}%</small></p>
+                  <p class="card-text mb-0"><small>Absolute: ${absPower} μV²</small></p>
+                </div>
+              </div>
+            </div>
+          `;
+        });
+
+        // Display ADHD indicators
+        const indicatorsDiv = document.getElementById('adhd-indicators');
+        const adhdCard = document.getElementById('adhd-indicators-card');
+        const thetaBetaRatio = ratios.theta_beta_ratio;
+        
+        let indicatorHtml = `
+          <h6>Theta/Beta Ratio: <span class="badge bg-info fs-6">${thetaBetaRatio.toFixed(3)}</span></h6>
+        `;
+        
+        if (thetaBetaRatio > 4.0) {
+          indicatorHtml += `
+            <div class="alert alert-danger mt-2" role="alert">
+              <strong>⚠️ Elevated Ratio (>4.0)</strong><br>
+              This elevated theta/beta ratio is commonly associated with ADHD in clinical research.
+              Further clinical assessment is recommended.
+            </div>
+          `;
+          adhdCard.querySelector('.card-header').className = 'card-header bg-danger text-white';
+        } else if (thetaBetaRatio > 3.0) {
+          indicatorHtml += `
+            <div class="alert alert-warning mt-2" role="alert">
+              <strong>⚡ Moderately Elevated (3.0-4.0)</strong><br>
+              The theta/beta ratio is moderately elevated. This may warrant attention during clinical evaluation.
+            </div>
+          `;
+          adhdCard.querySelector('.card-header').className = 'card-header bg-warning text-dark';
+        } else {
+          indicatorHtml += `
+            <div class="alert alert-success mt-2" role="alert">
+              <strong>✓ Normal Range (<3.0)</strong><br>
+              The theta/beta ratio is within the typical range for non-ADHD individuals.
+            </div>
+          `;
+          adhdCard.querySelector('.card-header').className = 'card-header bg-success text-white';
+        }
+        
+        indicatorsDiv.innerHTML = indicatorHtml;
+
+        // Scroll to band analysis section
+        document.getElementById('band-analysis-section').scrollIntoView({ behavior: 'smooth', block: 'start' });
       }
 
       // Attach submit event to form
